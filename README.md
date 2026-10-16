@@ -1,5 +1,9 @@
 # Sheet Music Generation
 
+The next experiment adds original-waveform evidence to the frozen v2 model:
+see [the v3 experiment protocol](docs/EXPERIMENT_V3.md). It is experimental;
+training completion and measured results must be checked in the external run logs.
+
 Experimental piano transcription refinement. The current milestone is **audio-to-MIDI note refinement**, not finished sheet-music engraving.
 
 ## Network v2
