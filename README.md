@@ -1,5 +1,9 @@
 # Sheet Music Generation
 
+Following real-listening regression in v3, the adopted reference remains v2
+(listening version 15). The next step is a [real-recording diagnostic benchmark](docs/REAL_EVALUATION.md),
+with paired clean/interference conditions and subgroup recall, not another model promotion.
+
 The next experiment adds original-waveform evidence to the frozen v2 model:
 see [the v3 experiment protocol](docs/EXPERIMENT_V3.md). It is experimental;
 training completion and measured results must be checked in the external run logs.
