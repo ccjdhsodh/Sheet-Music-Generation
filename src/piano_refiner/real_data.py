@@ -1,6 +1,6 @@
 """Small, provenance-recorded MAESTRO pilot; real piano plus synthetic strings."""
 from pathlib import Path
-import argparse,csv,hashlib,io,json,urllib.request,zipfile
+import argparse,csv,hashlib,io,json,urllib.request,zipfile,subprocess,sys,os
 import numpy as np,soundfile as sf
 from .remote_zip import HTTPRangeReader
 
@@ -36,6 +36,7 @@ def main():
     from .synthesize import render
     ap=argparse.ArgumentParser();ap.add_argument('--root',type=Path,required=True);ap.add_argument('--font',type=Path,required=True)
     ap.add_argument('--train-pieces',type=int,default=8);ap.add_argument('--validation-pieces',type=int,default=4);ap.add_argument('--test-pieces',type=int,default=8)
+    ap.add_argument('--evaluate-as-ready',action='store_true');ap.add_argument('--device',default='cpu')
     a=ap.parse_args();dest=a.root/'synthetic';dest.mkdir(parents=True,exist_ok=True)
     meta=a.root/'maestro-v3.0.0.csv'
     if not meta.exists():urllib.request.urlretrieve(BASE+meta.name,meta)
@@ -47,7 +48,8 @@ def main():
     if planfile.exists() and json.loads(planfile.read_text())!=plan:raise ValueError('Different dataset plan; use fresh output directory')
     planfile.write_text(json.dumps(plan,indent=2),encoding='utf-8')
     reader=HTTPRangeReader(plan['source']);archive=zipfile.ZipFile(reader);manifest=[]
-    for index,row in enumerate(selected):
+    ordered=sorted(selected,key=lambda r:{'test':0,'validation':1,'train':2}[r['split']])
+    for index,row in enumerate(ordered):
         pid=hashlib.sha256(row['midi_filename'].encode()).hexdigest()[:12]
         expected=[dest/f'{pid}_{j}_{c}.json' for j in range(3) for c in ['clean','strings10','strings0']]
         if all(p.exists() for p in expected):
@@ -55,6 +57,7 @@ def main():
                 d=json.loads(p.read_text());manifest.append({k:d[k] for k in ['id','composition_id','split','condition','piece_id']})
             continue
         prefix='maestro-v3.0.0/'
+        print(json.dumps({'stage':'fetching_piece','index':index+1,'split':row['split'],'source':row['audio_filename']}),flush=True)
         midi_bytes=archive.read(prefix+row['midi_filename'])
         midi=pretty_midi.PrettyMIDI(io.BytesIO(midi_bytes));allnotes=sorted([n for inst in midi.instruments if not inst.is_drum for n in inst.notes],key=lambda n:n.start)
         # ZipFile validates per-entry CRC; full archive SHA is not claimed.
@@ -88,6 +91,15 @@ def main():
                     'evaluation_window':[.3,11.7],'string_notes':strings if snr is not None else [],
                     'source_audio_sha256':hashlib.sha256(audio_bytes).hexdigest()},indent=2),encoding='utf-8')
         print(json.dumps({'stage':'real_data','pieces':index+1,'total':len(selected),'downloaded_mb':round(reader.used/1024**2)}),flush=True)
+        if a.evaluate_as_ready and row['split'] in ['test','validation']:
+            # Provisional results remain separate from the completed benchmark.
+            (a.root/'manifest.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in manifest),encoding='utf-8')
+            commands=[['extract','--checkpoint',os.environ['PIANO_CHECKPOINT'],'--device',a.device],
+                ['prepare_acoustic','--baseline',os.environ['BASELINE_CHECKPOINT']],
+                ['evaluate_real','--baseline',os.environ['BASELINE_CHECKPOINT'],'--checkpoint',os.environ['ACOUSTIC_CHECKPOINT'],
+                 '--output',str(a.root/'evaluation-progress'),'--device',a.device]]
+            for module,*options in commands:
+                subprocess.run([sys.executable,'-m','piano_refiner.'+module,'--root',str(a.root),*options],check=True)
     (a.root/'manifest.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in manifest),encoding='utf-8')
     print(json.dumps({'clips':len(manifest),'hours':len(manifest)*12/3600,'pieces':len(selected)}),flush=True)
 if __name__=='__main__':main()

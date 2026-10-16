@@ -16,6 +16,13 @@ ZIP entry CRCs are checked and selected audio hashes saved; the full archive's
 SHA-256 is not claimed to be verified. Download budgets prevent accidental bulk
 retrieval. Third-party recordings and derivatives stay on server storage, not GitHub.
 
+Network reads use four concurrent 1 MiB ranges with bounded retries. Test pieces
+are acquired first, followed by validation and training pieces, without changing
+selection or split membership. The runner extracts and evaluates after each newly
+completed evaluation piece; `evaluation-progress` contains provisional results
+on the available subset, not the final benchmark. Do not tune models on these
+partial test results. Final results are written to `evaluation` after all stages.
+
 The initial pilot selects 8 train, 4 validation and 8 test compositions, respecting
 official split labels and deduplicating composer/title across the selected set.
 Selection is a fixed hash order among pieces lasting 80–420 seconds, independent
