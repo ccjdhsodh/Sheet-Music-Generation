@@ -3,7 +3,7 @@ from pathlib import Path
 import argparse,hashlib,json
 import numpy as np,soundfile as sf,torch,pretty_midi
 from .acoustic import acoustic_patches
-from .acoustic_model import AcousticResidualRefiner
+from .acoustic_model import model_for_checkpoint,AttackEvidenceRefiner
 from .model import DualViewRefiner
 from .features import candidates,build_features
 from .targets import positions
@@ -16,7 +16,7 @@ def main():
     if ck['baseline_sha256']!=hashlib.sha256(a.baseline.read_bytes()).hexdigest():raise ValueError('Wrong baseline checkpoint')
     bc=torch.load(a.baseline,map_location=a.device,weights_only=False)
     base=DualViewRefiner(**bc['config']).to(a.device);base.load_state_dict(bc['model']);base.eval()
-    net=AcousticResidualRefiner().to(a.device);net.load_state_dict(ck['model']);net.eval()
+    net=model_for_checkpoint(ck).to(a.device);net.load_state_dict(ck['model']);net.eval()
     x,sr=sf.read(a.audio,always_2d=True);views=[dict(np.load(path)) for path in [a.mix,a.piano]]
     frames=min(round(len(x)/sr*100),*[len(d['frame_output']) for d in views]);seconds=frames/100
     from piano_transcription_inference.utilities import RegressionPostProcessor
@@ -38,7 +38,8 @@ def main():
         valid=torch.ones(1,len(local),dtype=torch.bool,device=a.device)
         with torch.no_grad():
             ctx=tensor(context);pos=tensor(positions(local));logits=base(tensor(patch),ctx,pos,valid)['action']
-            p=(1-net(tensor(raw),logits,ctx,pos,valid).softmax(-1)[0,:,0]).cpu().numpy()
+            extra={'patch':tensor(patch)} if isinstance(net,AttackEvidenceRefiner) else {}
+            p=(1-net(tensor(raw),logits,ctx,pos,valid,**extra).softmax(-1)[0,:,0]).cpu().numpy()
             bp=(1-logits.softmax(-1)[0,:,0]).cpu().numpy()
         for j,i in enumerate(ids):
             relative=local[j]['onset_time'];w=max(.1,min(relative,stop-start-relative,3)/3)

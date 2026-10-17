@@ -2,7 +2,7 @@ from pathlib import Path
 import argparse,json,hashlib
 import numpy as np,torch
 from .data import load_manifest
-from .acoustic_model import AcousticResidualRefiner
+from .acoustic_model import model_for_checkpoint,AttackEvidenceRefiner
 from .stratified_metrics import score_notes,aggregate,paired_interval
 
 def main():
@@ -12,11 +12,11 @@ def main():
     bc=torch.load(a.baseline,map_location='cpu',weights_only=False);ck=torch.load(a.checkpoint,map_location=a.device,weights_only=False)
     digest=hashlib.sha256(a.baseline.read_bytes()).hexdigest()
     if digest!=ck['baseline_sha256']:raise ValueError('Baseline mismatch')
-    net=AcousticResidualRefiner().to(a.device);net.load_state_dict(ck['model']);net.eval()
+    net=model_for_checkpoint(ck).to(a.device);net.load_state_dict(ck['model']);net.eval()
     manifest=load_manifest(a.root/'manifest.jsonl');entries=[]
     for r in manifest:
         if r['split'] not in ['validation','test']:continue
-        with np.load(a.root/'features'/f"{r['id']}.npz") as z:d={k:z[k] for k in ['context','position']}
+        with np.load(a.root/'features'/f"{r['id']}.npz") as z:d={k:z[k] for k in ['context','position','patch']}
         with np.load(a.root/'acoustic-v3'/f"{r['id']}.npz") as z:
             if str(z['baseline_sha256'])!=digest:raise ValueError('Stale baseline logits')
             raw=z['raw'].astype(np.float32);logits=z['base_logits']
@@ -24,7 +24,8 @@ def main():
         gt=json.loads((a.root/'synthetic'/f"{r['id']}.json").read_text())
         tensor=lambda x:torch.from_numpy(x)[None].to(a.device)
         with torch.no_grad():
-            base=tensor(logits);pred=net(tensor(raw),base,tensor(d['context']),tensor(d['position']),torch.ones(1,len(notes),device=a.device,dtype=torch.bool))
+            extra={'patch':tensor(d['patch'])} if isinstance(net,AttackEvidenceRefiner) else {}
+            base=tensor(logits);pred=net(tensor(raw),base,tensor(d['context']),tensor(d['position']),torch.ones(1,len(notes),device=a.device,dtype=torch.bool),**extra)
             scores={'v2':(1-base.softmax(-1)[0,:,0]).cpu().numpy(),'v3':(1-pred.softmax(-1)[0,:,0]).cpu().numpy()}
         choices={'pool':notes,'v2':[n for i,n in enumerate(notes) if scores['v2'][i]>=bc['threshold']],
                  'v3':[n for i,n in enumerate(notes) if scores['v3'][i]>=ck['threshold']]}

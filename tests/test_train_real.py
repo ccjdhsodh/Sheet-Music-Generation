@@ -1,9 +1,14 @@
 import copy,unittest
 import numpy as np
-from piano_refiner.train_real import retention_weights,acceptable
+from piano_refiner.train_real import retention_weights,acceptable,hard_negative_weights
 
 
 class AdaptationTests(unittest.TestCase):
+    def test_negative_mining_preserves_true_repeats(self):
+        notes=[dict(onset_time=0,midi_note=60),dict(onset_time=.2,midi_note=60),dict(onset_time=.3,midi_note=72)]
+        w=hard_negative_weights(notes,np.array([1,2,0]),np.array([.9,.9,.9]))
+        np.testing.assert_allclose(w,[1,1,3.8])
+
     def test_difficult_positives_weighted_false_notes_not_protected(self):
         truth=[dict(pitch=40,velocity=30,start=0,end=.1)]
         w=retention_weights([{},{}],truth,np.array([0,-1]),np.array([2,0]))
